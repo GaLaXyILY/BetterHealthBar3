@@ -16,6 +16,7 @@ import kr.toxicity.healthbar.api.trigger.PacketTrigger
 import net.kyori.adventure.bossbar.BossBar
 import net.kyori.adventure.pointer.Pointers
 import net.kyori.adventure.text.Component
+import net.kyori.adventure.text.serializer.gson.GsonComponentSerializer
 import net.minecraft.network.Connection
 import net.minecraft.network.protocol.game.*
 import net.minecraft.server.level.ServerLevel
@@ -27,6 +28,7 @@ import net.minecraft.world.entity.Display.TextDisplay
 import net.minecraft.world.entity.EntityType
 import net.minecraft.world.entity.LivingEntity
 import net.minecraft.world.level.entity.LevelEntityGetter
+import net.minecraft.world.level.entity.LevelEntityGetterAdapter
 import net.minecraft.world.level.entity.PersistentEntitySectionManager
 import org.bukkit.Bukkit
 import org.bukkit.GameMode
@@ -37,6 +39,7 @@ import org.bukkit.craftbukkit.v1_20_R1.CraftWorld
 import org.bukkit.craftbukkit.v1_20_R1.entity.CraftLivingEntity
 import org.bukkit.craftbukkit.v1_20_R1.entity.CraftPlayer
 import org.bukkit.craftbukkit.v1_20_R1.persistence.CraftPersistentDataContainer
+import org.bukkit.craftbukkit.v1_20_R1.util.CraftChatMessage
 import org.bukkit.entity.Entity
 import org.bukkit.entity.Player
 import org.bukkit.event.entity.EntityDamageEvent
@@ -48,12 +51,13 @@ import org.bukkit.util.Vector
 import org.joml.Vector3f
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.sqrt
 
 @Suppress("UNUSED")
-class NMSImpl: NMS {
+class NMSImpl : NMS {
     private val plugin
         get() = BetterHealthBar.inst()
 
@@ -74,6 +78,8 @@ class NMSImpl: NMS {
     }
     private val entityTracker = ServerLevel::class.java.fields.firstOrNull {
         it.type == PersistentEntitySectionManager::class.java
+    }?.apply { 
+        isAccessible = true
     }
 
     private val getEntityById: (LevelEntityGetter<net.minecraft.world.entity.Entity>, Int) -> net.minecraft.world.entity.Entity? = if (plugin.isPaper) EntityLookup::class.java.declaredFields.first {
@@ -83,7 +89,7 @@ class NMSImpl: NMS {
         { e, i ->
             (it[e] as Int2ReferenceOpenHashMap<*>)[i] as? net.minecraft.world.entity.Entity
         }
-    } else PersistentEntitySectionManager::class.java.declaredFields.first {
+    } else LevelEntityGetterAdapter::class.java.declaredFields.first {
         net.minecraft.world.level.entity.EntityLookup::class.java.isAssignableFrom(it.type)
     }.let {
         it.isAccessible = true
@@ -97,6 +103,15 @@ class NMSImpl: NMS {
         it.isAccessible = true
         { p ->
             it[p] as Int
+        }
+    }
+    private val textVanilla: (Component) -> net.minecraft.network.chat.Component = if (plugin.isPaper) {
+        {
+            PaperAdventure.asVanilla(it)
+        }
+    } else {
+        {
+            CraftChatMessage.fromJSON(GsonComponentSerializer.gson().serialize(it))
         }
     }
 
@@ -232,7 +247,8 @@ class NMSImpl: NMS {
                 set(TextDisplay.DATA_LINE_WIDTH_ID, Int.MAX_VALUE)
             }
             brightnessOverride = Brightness(15, 15)
-            text = PaperAdventure.asVanilla(component)
+            text = textVanilla(component)
+            viewRange = 1024F
             moveTo(
                 location.x,
                 location.y,
@@ -240,10 +256,24 @@ class NMSImpl: NMS {
                 location.yaw,
                 location.pitch
             )
-            connection.send(ClientboundAddEntityPacket(this))
-            connection.send(ClientboundSetEntityDataPacket(id, entityData.nonDefaultValues!!))
+            connection.send(ClientboundBundlePacket(listOf(
+                ClientboundAddEntityPacket(this),
+                ClientboundSetEntityDataPacket(id, entityData.nonDefaultValues!!)
+            )))
         }
         return object : VirtualTextDisplay {
+            override fun shadowRadius(radius: Float) {
+                display.shadowRadius = radius
+            }
+            override fun shadowStrength(strength: Float) {
+                display.shadowStrength = strength
+            }
+            override fun update() {
+                connection.send(ClientboundBundlePacket(listOf(
+                    ClientboundTeleportEntityPacket(display),
+                    ClientboundSetEntityDataPacket(display.id, display.entityData.nonDefaultValues!!)
+                )))
+            }
             override fun teleport(location: Location) {
                 display.moveTo(
                     location.x,
@@ -252,18 +282,15 @@ class NMSImpl: NMS {
                     location.yaw,
                     location.pitch
                 )
-                connection.send(ClientboundTeleportEntityPacket(display))
             }
 
             override fun text(component: Component) {
-                display.text = PaperAdventure.asVanilla(component)
-                connection.send(ClientboundSetEntityDataPacket(display.id, display.entityData.nonDefaultValues!!))
+                display.text = textVanilla(component)
             }
 
             override fun transformation(location: Vector, scale: Vector) {
                 fun Vector.toVanilla() = Vector3f(x.toFloat(), y.toFloat(), z.toFloat())
                 display.setTransformation(Transformation(location.toVanilla(), null, scale.toVanilla(), null))
-                connection.send(ClientboundSetEntityDataPacket(display.id, display.entityData.nonDefaultValues!!))
             }
 
             override fun remove() {
@@ -284,7 +311,7 @@ class NMSImpl: NMS {
         injectionMap.remove(player.player().uniqueId)?.uninject()
     }
 
-    private inner class PlayerInjection(val player: HealthBarPlayer): ChannelDuplexHandler() {
+    private inner class PlayerInjection(val player: HealthBarPlayer) : ChannelDuplexHandler() {
         private val serverPlayer = (player.player() as CraftPlayer).handle
         private val connection = serverPlayer.connection
         private val world = player.player().world
@@ -304,61 +331,64 @@ class NMSImpl: NMS {
         }
 
         private fun show(handle: Any, trigger: HealthBarTriggerType, entity: net.minecraft.world.entity.Entity?) {
-            val playerX = serverPlayer.x
-            val playerY = serverPlayer.y
-            val playerZ = serverPlayer.z
             fun Double.square() = this * this
             entity?.let { e ->
-                if (sqrt((playerX - e.x).square()  + (playerY - e.y).square() + (playerZ - e.z).square()) > plugin.configManager().lookDistance()) return
+                if (sqrt((serverPlayer.x - e.x).square()  + (serverPlayer.y - e.y).square() + (serverPlayer.z - e.z).square()) > plugin.configManager().lookDistance()) return
                 val set = HashSet(plugin.healthBarManager().allHealthBars().filter {
                     it.isDefault && it.triggers().contains(trigger)
                 })
-                fun add() {
+                fun add(sync: Boolean = false) {
                     val bukkit = e.bukkitEntity
                     if (bukkit is CraftLivingEntity && bukkit.isValid) {
                         val adapt = plugin.mobManager().entity(if (bukkit is Player) foliaAdapt(bukkit) else foliaAdapt(bukkit))
-                        adapt.mob()?.let {
-                            set.addAll(it.configuration().healthBars())
-                        }
                         val types = adapt.mob()?.configuration()?.types()
                         val packet = PacketTrigger(trigger, handle)
-                        set.filter {
-                            it.isDefault || (types != null && it.applicableTypes().any { t ->
-                                types.contains(t)
-                            })
-                        }.forEach {
-                            player.showHealthBar(it, packet, adapt)
+                        val run = Runnable {
+                            set.filter {
+                                (adapt.mob()?.configuration()?.ignoreDefault() != true && it.isDefault) || (types != null && it.applicableTypes().any { t ->
+                                    types.contains(t)
+                                })
+                            }.forEach {
+                                player.showHealthBar(it, packet, adapt)
+                            }
+                            adapt.mob()?.configuration()?.healthBars()?.forEach {
+                                player.showHealthBar(it, packet, adapt)
+                            }
                         }
+                        if (sync) plugin.scheduler().asyncTask(run)
+                        else run.run()
                     }
                 }
                 if (plugin.isFolia) plugin.scheduler().task(world, e.x.toInt() shr 4, e.z.toInt() shr 4) {
-                    add()
+                    add(true)
                 } else add()
             }
         }
         private fun getViewedEntity(): List<LivingEntity> {
-            val playerX = serverPlayer.x
-            val playerY = serverPlayer.y
-            val playerZ = serverPlayer.z
+            return getLevelGetter().all
+                .asSequence()
+                .mapNotNull { 
+                    it as? LivingEntity
+                }
+                .filter { 
+                    it !== serverPlayer && it.canSee()
+                }
+                .toList()
+        }
 
-            var yaw = serverPlayer.yHeadRot.toDouble()
-            if (yaw < 90) yaw += 90
-            else yaw = -(360 - (yaw + 90))
-            val playerYaw = Math.toRadians(yaw)
+        private fun net.minecraft.world.entity.Entity.canSee(): Boolean {
+            val playerYaw = Math.toRadians(serverPlayer.yRot.toDouble())
             val playerPitch = Math.toRadians(-serverPlayer.xRot.toDouble())
 
             val degree = plugin.configManager().lookDegree()
 
-            return getLevelGetter().all.mapNotNull {
-                if (it is LivingEntity && it !== serverPlayer) {
-                    val x = it.x
-                    val y = it.y
-                    val z = it.z
+            val x = this.z - serverPlayer.z
+            val y = this.y - serverPlayer.y
+            val z = -(this.x - serverPlayer.x)
 
-                    if (abs(atan2(y - playerY, abs(x - playerX)) - playerPitch) <= degree && abs(atan2(z - playerZ, x - playerX) - playerYaw) <= degree) it
-                    else null
-                } else null
-            }
+            val dy = abs(atan2(y, abs(x)) - playerPitch)
+            val dz = abs(atan2(z, x) - playerYaw)
+            return (dy <= degree || dy >= 2 * PI - degree) && (dz <= degree || dz >= 2 * PI - degree)
         }
 
         @Suppress("UNCHECKED_CAST")

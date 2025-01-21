@@ -4,7 +4,7 @@ import kr.toxicity.healthbar.api.component.WidthComponent
 import kr.toxicity.healthbar.api.condition.HealthBarCondition
 import kr.toxicity.healthbar.api.healthbar.GroupIndex
 import kr.toxicity.healthbar.api.healthbar.HealthBar
-import kr.toxicity.healthbar.api.healthbar.HealthBarData
+import kr.toxicity.healthbar.api.event.HealthBarCreateEvent
 import kr.toxicity.healthbar.api.trigger.HealthBarTriggerType
 import kr.toxicity.healthbar.api.layout.LayoutGroup
 import kr.toxicity.healthbar.api.nms.VirtualTextDisplay
@@ -12,7 +12,6 @@ import kr.toxicity.healthbar.api.renderer.HealthBarRenderer
 import kr.toxicity.healthbar.manager.ConfigManagerImpl
 import kr.toxicity.healthbar.manager.LayoutManagerImpl
 import kr.toxicity.healthbar.util.*
-import org.bukkit.Location
 import org.bukkit.configuration.ConfigurationSection
 import org.bukkit.util.Vector
 import java.util.ArrayList
@@ -47,6 +46,8 @@ class HealthBarImpl(
             it.getDouble("z", 1.0)
         )
     } ?: Vector(1, 1, 1)
+    private val shadowRadius = section.getDouble("shadow-radius", 0.0).toFloat()
+    private val shadowStrength = section.getDouble("shadow-strength", 1.0).toFloat()
 
     override fun path(): String = path
     override fun uuid(): UUID = uuid
@@ -56,10 +57,12 @@ class HealthBarImpl(
     override fun condition(): HealthBarCondition = conditions
     override fun isDefault(): Boolean = isDefault
     override fun scale(): Vector = Vector(scale.x, scale.y, scale.z)
+    override fun shadowRadius(): Float = shadowRadius
+    override fun shadowStrength(): Float = shadowStrength
 
     override fun duration(): Int = duration
 
-    override fun createRenderer(pair: HealthBarData): HealthBarRenderer {
+    override fun createRenderer(pair: HealthBarCreateEvent): HealthBarRenderer {
         return if (ConfigManagerImpl.useCoreShaders()) SingleRenderer(pair) else MultiRenderer(pair)
     }
 
@@ -76,34 +79,35 @@ class HealthBarImpl(
         return s.hashCode()
     }
 
-    private abstract inner class AbstractRenderer(protected val pair: HealthBarData): HealthBarRenderer {
-        protected val indexes = groups.mapNotNull {
+    private abstract inner class AbstractRenderer(val event: HealthBarCreateEvent) : HealthBarRenderer {
+        val indexes = groups.mapNotNull {
             it.group()
         }.associateWith {
             GroupIndex()
         }
 
-        protected val render = groups.map {
-            RenderedLayout(it,  pair)
+        val render = groups.map {
+            RenderedLayout(it,  event)
         }.toMutableList()
 
-        protected var d = 0
+        var d = 0
 
         override fun hasNext(): Boolean {
-            val entity = pair.entity.entity()
-            val player = pair.player.player()
+            if (!event.check()) return false
+            val entity = event.entity.entity()
+            val player = event.player.player()
             return entity.isValid && entity.world.uid == player.world.uid && player.location.distance(entity.location) < ConfigManagerImpl.lookDistance() && (duration < 0 || ++d <= duration)
         }
         override fun canRender(): Boolean {
-            return conditions.apply(pair)
+            return conditions.apply(event)
         }
         override fun updateTick() {
             d = 0
         }
     }
     private inner class MultiRenderer(
-        pair: HealthBarData
-    ): AbstractRenderer(pair) {
+        pair: HealthBarCreateEvent
+    ) : AbstractRenderer(pair) {
 
         private val displays = render.map {
             it.createPool(pair, indexes)
@@ -147,8 +151,8 @@ class HealthBarImpl(
         }
     }
     private inner class SingleRenderer(
-        pair: HealthBarData
-    ): AbstractRenderer(pair) {
+        pair: HealthBarCreateEvent
+    ) : AbstractRenderer(pair) {
 
         private val display = pair.createEntity(render())
 
@@ -180,8 +184,9 @@ class HealthBarImpl(
             } else {
                 removeUnused()
                 val render = render()
-                display.teleport(pair.toEntityLocation())
+                display.teleport(event.toEntityLocation())
                 display.text(render.component.build())
+                display.update()
                 return true
             }
         }

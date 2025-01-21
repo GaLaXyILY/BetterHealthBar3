@@ -2,6 +2,7 @@ package kr.toxicity.healthbar.api.condition;
 
 import kr.toxicity.healthbar.api.placeholder.HealthBarPlaceholder;
 import kr.toxicity.healthbar.api.placeholder.PlaceholderContainer;
+import kr.toxicity.healthbar.api.placeholder.PlaceholderOption;
 import org.bukkit.configuration.ConfigurationSection;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -9,13 +10,13 @@ import org.jetbrains.annotations.Nullable;
 import java.util.Objects;
 
 public interface HealthBarOperation<T> {
-    HealthBarOperationCondition<Double> NUMBER = new HealthBarOperationCondition<>(Double.class)
-            .add("==", Double::equals)
-            .add("!=", (a, b) -> !a.equals(b))
-            .add(">=", (a, b) -> a >= b)
-            .add("<=", (a, b) -> a <= b)
-            .add(">", (a, b) -> a > b)
-            .add("<", (a, b) -> a < b)
+    HealthBarOperationCondition<Number> NUMBER = new HealthBarOperationCondition<>(Number.class)
+            .add("==", (a, b) -> a.doubleValue() == b.doubleValue())
+            .add("!=", (a, b) -> a.doubleValue() != b.doubleValue())
+            .add(">=", (a, b) -> a.doubleValue() >= b.doubleValue())
+            .add("<=", (a, b) -> a.doubleValue() <= b.doubleValue())
+            .add(">", (a, b) -> a.doubleValue() > b.doubleValue())
+            .add("<", (a, b) -> a.doubleValue() < b.doubleValue())
             ;
     HealthBarOperationCondition<Boolean> BOOL = new HealthBarOperationCondition<>(Boolean.class)
             .add("==", (a, b) -> a == b)
@@ -44,15 +45,25 @@ public interface HealthBarOperation<T> {
         return HealthBarOperationCondition.find(clazz, name);
     }
     static <T> @NotNull HealthBarCondition of(@NotNull HealthBarPlaceholder<T> one, @NotNull HealthBarPlaceholder<T> other, @NotNull HealthBarOperation<T> condition) {
-        return t -> condition.invoke(one.value(t), other.value(t));
+        return t -> {
+            var v1 = one.value(t);
+            var v2 = other.value(t);
+            if (v1 == null || v2 == null) return false;
+            return condition.invoke(v1, v2);
+        };
     }
     @SuppressWarnings("unchecked")
     static @NotNull HealthBarCondition of(@NotNull String one, @NotNull String two, @NotNull String condition) {
-        var parseOne = (HealthBarPlaceholder<Object>) PlaceholderContainer.parse(one);
-        var parseTwo = PlaceholderContainer.parse(two);
+        var parseOne = (HealthBarPlaceholder<Object>) PlaceholderContainer.parse(PlaceholderOption.EMPTY, one);
+        var parseTwo = PlaceholderContainer.parse(PlaceholderOption.EMPTY, two);
         if (parseOne.type() != parseTwo.type()) throw new RuntimeException("type mismatch: " + parseOne.type().getSimpleName() + " between " + parseTwo.type().getSimpleName() + ".");
         var operation = Objects.requireNonNull(find(parseOne.type(), condition), "Unable to find this operation: " + condition);
-        return p -> operation.invoke(parseOne.value(p), parseTwo.value(p));
+        return p -> {
+            var v1 = parseOne.value(p);
+            var v2 = parseTwo.value(p);
+            if (v1 == null || v2 == null) return false;
+            return operation.invoke(v1, v2);
+        };
     }
 
     static @NotNull HealthBarCondition of(@NotNull ConfigurationSection section) {

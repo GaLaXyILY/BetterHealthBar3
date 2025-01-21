@@ -11,6 +11,10 @@ data class MinecraftVersion(
         val current = MinecraftVersion(Bukkit.getBukkitVersion()
             .substringBefore('-'))
 
+        val version1_21_4 = MinecraftVersion(1, 21, 4)
+        val version1_21_3 = MinecraftVersion(1, 21, 3)
+        val version1_21_2 = MinecraftVersion(1, 21, 2)
+        val version1_21_1 = MinecraftVersion(1, 21, 1)
         val version1_21 = MinecraftVersion(1, 21, 0)
         val version1_20_6 = MinecraftVersion(1, 20, 6)
         val version1_20_5 = MinecraftVersion(1, 20, 5)
@@ -22,6 +26,10 @@ data class MinecraftVersion(
         val version1_19_4 = MinecraftVersion(1, 19, 4)
 
         private val packVersion = mapOf(
+            version1_21_4 to 46,
+            version1_21_3 to 42,
+            version1_21_2 to 42,
+            version1_21_1 to 34,
             version1_21 to 34,
             version1_20_6 to 32,
             version1_20_5 to 32,
@@ -55,6 +63,6 @@ data class MinecraftVersion(
     fun packVersion() = packVersion[this] ?: 7
 
     override fun toString(): String {
-        return "$first.$second.$third"
+        return if (third != 0) "$first.$second.$third" else "$first.$second"
     }
 }

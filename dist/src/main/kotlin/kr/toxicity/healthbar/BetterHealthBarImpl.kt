@@ -3,9 +3,9 @@ package kr.toxicity.healthbar
 import kr.toxicity.healthbar.api.BetterHealthBar
 import kr.toxicity.healthbar.api.bedrock.BedrockAdapter
 import kr.toxicity.healthbar.api.manager.*
-import kr.toxicity.healthbar.api.modelengine.ModelEngineAdapter
+import kr.toxicity.healthbar.api.modelengine.ModelAdapter
 import kr.toxicity.healthbar.api.nms.NMS
-import kr.toxicity.healthbar.api.plugin.ReloadResult
+import kr.toxicity.healthbar.api.pack.PackType
 import kr.toxicity.healthbar.api.plugin.ReloadState
 import kr.toxicity.healthbar.api.scheduler.WrappedScheduler
 import kr.toxicity.healthbar.bedrock.FloodgateAdapter
@@ -21,6 +21,7 @@ import kr.toxicity.healthbar.scheduler.StandardScheduler
 import kr.toxicity.healthbar.util.*
 import kr.toxicity.healthbar.version.MinecraftVersion
 import kr.toxicity.healthbar.version.ModelEngineVersion
+import kr.toxicity.model.api.tracker.EntityTracker
 import net.kyori.adventure.platform.bukkit.BukkitAudiences
 import net.kyori.adventure.text.Component
 import net.kyori.adventure.text.event.ClickEvent
@@ -41,7 +42,7 @@ import java.util.function.BiConsumer
 import java.util.jar.JarFile
 
 @Suppress("UNUSED")
-class BetterHealthBarImpl: BetterHealthBar() {
+class BetterHealthBarImpl : BetterHealthBar() {
 
     private val isFolia = runCatching {
         Class.forName("io.papermc.paper.threadedregions.scheduler.FoliaAsyncScheduler")
@@ -52,14 +53,15 @@ class BetterHealthBarImpl: BetterHealthBar() {
         true
     }.getOrDefault(false)
     private var bedrock = BedrockAdapter.NONE
-    private var modelEngine = ModelEngineAdapter.NONE
+    private var model = ModelAdapter.NONE
     private lateinit var nms: NMS
     private lateinit var audiences: BukkitAudiences
     private val scheduler = if (isFolia) FoliaScheduler() else StandardScheduler()
 
     private val managers = listOf(
-        ConfigManagerImpl,
+        EncodeManager,
         CompatibilityManager,
+        ConfigManagerImpl,
         ListenerManagerImpl,
         PlaceholderManagerImpl,
         ImageManagerImpl,
@@ -76,15 +78,10 @@ class BetterHealthBarImpl: BetterHealthBar() {
     override fun onEnable() {
         val log = ArrayList<String>()
         val manager = Bukkit.getPluginManager()
-        manager.getPlugin("ModelEngine")?.let {
-            runWithHandleException("Failed to load ModelEngine support.") {
-                val version = ModelEngineVersion(it.description.version)
-                modelEngine = if (version >= ModelEngineVersion.version_4_0_0) CurrentModelEngineAdapter() else LegacyModelEngineAdapter()
-                log.add("ModelEngine support enabled. $version")
-            }
-        }
         nms = when (MinecraftVersion.current) {
-            MinecraftVersion.version1_21 -> kr.toxicity.healthbar.nms.v1_21_R1.NMSImpl()
+            MinecraftVersion.version1_21_4 -> kr.toxicity.healthbar.nms.v1_21_R3.NMSImpl()
+            MinecraftVersion.version1_21_2, MinecraftVersion.version1_21_3 -> kr.toxicity.healthbar.nms.v1_21_R2.NMSImpl()
+            MinecraftVersion.version1_21, MinecraftVersion.version1_21_1 -> kr.toxicity.healthbar.nms.v1_21_R1.NMSImpl()
             MinecraftVersion.version1_20_5, MinecraftVersion.version1_20_6 -> kr.toxicity.healthbar.nms.v1_20_R4.NMSImpl()
             MinecraftVersion.version1_20_3, MinecraftVersion.version1_20_4 -> kr.toxicity.healthbar.nms.v1_20_R3.NMSImpl()
             MinecraftVersion.version1_20_2 -> kr.toxicity.healthbar.nms.v1_20_R2.NMSImpl()
@@ -99,6 +96,17 @@ class BetterHealthBarImpl: BetterHealthBar() {
                 return
             }
         }
+        manager.getPlugin("ModelEngine")?.let {
+            runWithHandleException("Failed to load ModelEngine support.") {
+                val version = ModelEngineVersion(it.description.version)
+                model = if (version >= ModelEngineVersion.version_4_0_0) CurrentModelEngineAdapter() else LegacyModelEngineAdapter()
+                log.add("ModelEngine support enabled: $version")
+            }
+        } ?: run {
+            if (manager.isPluginEnabled("BetterModel")) model = ModelAdapter {
+                EntityTracker.tracker(it.uniqueId)?.height()
+            }
+        }
         if (manager.isPluginEnabled("Geyser-Spigot")) {
             log.add("Geyser support enabled.")
             bedrock = GeyserAdapter()
@@ -111,11 +119,13 @@ class BetterHealthBarImpl: BetterHealthBar() {
             if (commandSender.hasPermission("betterhealthbar.reload")) {
                 commandSender.sendMessage("Starts reloading. please wait...")
                 CompletableFuture.runAsync {
-                    val reload = reload()
-                    when (reload.state) {
-                        ReloadState.SUCCESS -> commandSender.sendMessage("Reload success! (${DecimalFormat.getInstance().format(reload.time)} ms)")
-                        ReloadState.FAIL -> commandSender.sendMessage("Failed to reload.")
-                        ReloadState.ON_RELOAD -> commandSender.sendMessage("This plugin is still on reload.")
+                    when (val reload = reload()) {
+                        is ReloadState.Success -> commandSender.sendMessage("Reload success! (${DecimalFormat.getInstance().format(reload.time)} ms)")
+                        is ReloadState.Failure -> {
+                            commandSender.sendMessage("Failed to reload.")
+                            reload.throwable.handleException("Failed to reload.")
+                        }
+                        is ReloadState.OnReload -> commandSender.sendMessage("This plugin is still on reload.")
                     }
                 }
             } else {
@@ -128,9 +138,9 @@ class BetterHealthBarImpl: BetterHealthBar() {
                 it.start()
             }
             log.add("Plugin enabled.")
-            scheduler.task {
-                when (reload().state) {
-                    ReloadState.SUCCESS -> info(*log.toTypedArray())
+            if (!CompatibilityManager.usePackTypeNone || ConfigManagerImpl.packType() != PackType.NONE) scheduler.task {
+                when (reload()) {
+                    is ReloadState.Success -> info(*log.toTypedArray())
                     else -> {
                         manager.disablePlugin(this)
                     }
@@ -167,8 +177,8 @@ class BetterHealthBarImpl: BetterHealthBar() {
         }
     }
 
-    override fun reload(): ReloadResult {
-        if (onReload) return ReloadResult(ReloadState.ON_RELOAD, 0)
+    override fun reload(): ReloadState {
+        if (onReload) return ReloadState.ON_RELOAD
         val time = System.currentTimeMillis()
         onReload = true
         return runWithHandleException("Error has occurred while reloading.") {
@@ -178,25 +188,24 @@ class BetterHealthBarImpl: BetterHealthBar() {
             }
             val resource = PackResource()
             managers.forEach {
-                info("Reloading ${it.javaClass.simpleName}...")
+                debug("Reloading ${it.javaClass.simpleName}...")
                 it.reload(resource)
             }
-            PackGenerator.zip(ConfigManagerImpl.packType(), resource)
             managers.forEach {
                 it.postReload()
             }
             onReload = false
-            ReloadResult(ReloadState.SUCCESS, System.currentTimeMillis() - time)
+            ReloadState.Success(System.currentTimeMillis() - time, PackGenerator.zip(ConfigManagerImpl.packType(), resource))
         }.getOrElse {
             onReload = false
-            ReloadResult(ReloadState.FAIL, System.currentTimeMillis() - time)
+            ReloadState.Failure(it)
         }
     }
 
     override fun onReload(): Boolean = onReload
     override fun bedrock(): BedrockAdapter = bedrock
     override fun miniMessage(): MiniMessage = MINI_MESSAGE
-    override fun modelEngine(): ModelEngineAdapter = modelEngine
+    override fun modelAdapter(): ModelAdapter = model
     override fun scheduler(): WrappedScheduler = scheduler
     override fun nms(): NMS = nms
     override fun isFolia(): Boolean = isFolia
@@ -235,6 +244,7 @@ class BetterHealthBarImpl: BetterHealthBar() {
     override fun placeholderManager(): PlaceholderManager = PlaceholderManagerImpl
     override fun mobManager(): MobManager = MobManagerImpl
     override fun audiences(): BukkitAudiences = audiences
+    override fun hookOtherShaders(): Boolean = CompatibilityManager.hookOtherShaders
 
     override fun onDisable() {
         runWithHandleException("Error has occurred while disabling.") {

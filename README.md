@@ -2,6 +2,8 @@
   
 ![healthbar](https://github.com/toxicity188/BetterHealthBar3/assets/114675706/8af7d97c-3277-42f7-bccd-d5e124dfa5df)  
 
+**NOTICE: If you want to use BetterHealthBar with shaderspack, set use-core-shaders to false in config.yml (Default is true)**  
+
 Welcome to BetterHealthBar!
 
 [![GitHub Release](https://img.shields.io/github/v/release/toxicity188/BetterHealthBar3?display_name=release&style=for-the-badge&logo=kotlin)](https://github.com/toxicity188/BetterHealthBar3/releases/latest)
@@ -22,9 +24,9 @@ This plugin implements beautiful health bar!
 ![ezgif-4-6688863fff](https://github.com/toxicity188/BetterHealthBar3/assets/114675706/8484a92e-d0c2-4fd5-a766-5c5cb9fe697c)  
 This plugin supports sight-trace system.
 
-### Custom core shader
+### Custom core shaders
 ![2024_05_03_10_05_19_637-min](https://github.com/toxicity188/BetterHealthBar3/assets/114675706/7a0efa03-a6e7-42fd-b38e-a92d69503ad3)  
-This plugin has it's own core shader, fixes z-fighting issue!
+This plugin has it's own core shaders, fixes z-fighting issue!
 
 ### Stack system
 ![녹화_2024_05_05_10_11_17_395-min](https://github.com/toxicity188/BetterHealthBar3/assets/114675706/d0903a79-e55d-4634-babb-063af2ef0c7c)  
@@ -38,7 +40,7 @@ This plugin supports ModelEngine, automatically detects mob's height.
 No
 
 # Version
-1.19.4-1.21
+1.19.4-1.21.4
 
 # Command
 /healthbar - Reload command
@@ -50,6 +52,7 @@ betterhealthbar.reload - Access to reload command
 ./gradlew build
 
 # API
+[![](https://jitpack.io/v/toxicity188/BetterHealthBar3.svg)](https://jitpack.io/#toxicity188/BetterHealthBar3)
 ``` kotlin
 repositories {
   mavenCenteral()
@@ -61,4 +64,8 @@ dependencies {
 }
 ```
 # License
-This plugin is basically premium plugin, so you have to purchase it in SpigotMC to use it. but i allow you to download source, decompile/compile plugin or rebuild. I want to make this plugin free and get profit only depending on donation. but in BetterHud, there's no one who donate me. so i have make a significant decision: abondon my plugin, or make them premium. But don't worry, i will do my best while i have a time.
+This plugin is basically premium plugin, so you have to purchase it in SpigotMC to use it. but i allow you to download source, decompile/compile plugin or rebuild.
+
+# Extra
+![화면 캡처 2024-12-03 003808](https://github.com/user-attachments/assets/44f6a200-96e0-45f4-8af2-0358eb11001d)  
+In short, I never do it myself; why don't you request MythicCraft to make a MythicHealthBar too?

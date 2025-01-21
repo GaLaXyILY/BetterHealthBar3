@@ -20,7 +20,7 @@ import java.util.TreeSet
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.roundToInt
 
-object TextManagerImpl: TextManager, BetterHealthBerManager {
+object TextManagerImpl : TextManager, BetterHealthBerManager {
 
     private val frc = FontRenderContext(null, true, true)
     private const val SPLIT_SIZE = 16
@@ -31,13 +31,14 @@ object TextManagerImpl: TextManager, BetterHealthBerManager {
     override fun text(name: String): HealthBarText? = textMap[name]
 
     override fun start() {
-        val charWidth = HashMap<Char, Int>()
+        val charWidth = HashMap<Int, Int>()
         PLUGIN.getResource("width.txt")?.let {
             InputStreamReader(it, StandardCharsets.UTF_8).buffered().use { reader ->
                 reader.readLines().forEach { line ->
-                    if (line.length < 2) return@forEach
+                    val split = line.split(':')
+                    if (split.size < 2) return@forEach
                     runCatching {
-                        charWidth[line[0]] = line.substring(1).toInt()
+                        charWidth[split[0].toInt(16)] = split[1].toInt()
                     }
                 }
             }
@@ -54,7 +55,7 @@ object TextManagerImpl: TextManager, BetterHealthBerManager {
         textMap.clear()
         textMap["default"] = default
         val fonts = resource.dataFolder.subFolder("fonts")
-        resource.dataFolder.subFolder("texts").forEachAllYamlAsync { file, s, configurationSection ->
+        resource.dataFolder.subFolder("texts").forEachAllYaml { file, s, configurationSection ->
             runWithHandleException("Unable to read this text: $s in ${file.path}") {
                 val font = Font.createFont(Font.TRUETYPE_FONT, File(fonts, configurationSection.getString("file").ifNull("Unable to find 'file' configuration.").replace('/', File.separatorChar)).apply {
                     if (!exists()) throw RuntimeException("Unable to find this font: $path")
@@ -68,7 +69,7 @@ object TextManagerImpl: TextManager, BetterHealthBerManager {
     }
 
     private class CharImage(
-        val char: Char,
+        val char: Int,
         val image: BufferedImage
     ): Comparable<CharImage> {
         override fun equals(other: Any?): Boolean {
@@ -91,9 +92,9 @@ object TextManagerImpl: TextManager, BetterHealthBerManager {
 
     private fun parseFont(path: String, font: Font): HealthBarTextImpl {
         val imageMap = TreeMap<Int, MutableSet<CharImage>>()
-        val charWidth = HashMap<Char, Int>()
+        val charWidth = HashMap<Int, Int>()
 
-        fun register(char: Char, image: BufferedImage) {
+        fun register(char: Int, image: BufferedImage) {
             synchronized(imageMap) {
                 imageMap.computeIfAbsent(image.width) {
                     TreeSet()
@@ -106,12 +107,12 @@ object TextManagerImpl: TextManager, BetterHealthBerManager {
 
         val height = (font.size.toDouble() * 1.4).roundToInt()
 
-        (Char.MIN_VALUE..Char.MAX_VALUE).filter {
+        (0..0x10FFFF).filter {
             font.canDisplay(it)
         }.forEachAsync {
             BufferedImage(font.size, height, BufferedImage.TYPE_INT_ARGB).apply {
                 createGraphics().run {
-                    fill(font.createGlyphVector(frc, it.toString()).getOutline(0F, font.size.toFloat()))
+                    fill(font.createGlyphVector(frc, it.parseChar()).getOutline(0F, font.size.toFloat()))
                     dispose()
                 }
             }.removeEmptyWidth()?.let { image ->
@@ -128,7 +129,7 @@ object TextManagerImpl: TextManager, BetterHealthBerManager {
                 target.createGraphics().run {
                     image.forEachIndexed { index, charImage ->
                         drawImage(charImage.image, it.key * (index % SPLIT_SIZE), height * (index / SPLIT_SIZE), null)
-                        sb.append(charImage.char)
+                        sb.appendCodePoint(charImage.char)
                         if ((index + 1) % SPLIT_SIZE == 0) {
                             array.add(JsonPrimitive(sb.toString()))
                             sb.setLength(0)

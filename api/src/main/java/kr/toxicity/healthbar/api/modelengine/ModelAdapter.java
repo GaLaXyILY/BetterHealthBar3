@@ -4,8 +4,9 @@ import org.bukkit.entity.Entity;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-public interface ModelEngineAdapter {
-    ModelEngineAdapter NONE = e -> null;
+@FunctionalInterface
+public interface ModelAdapter {
+    ModelAdapter NONE = e -> null;
     @Nullable
     Double height(@NotNull Entity entity);
 }

@@ -2,6 +2,7 @@ package kr.toxicity.healthbar.player
 
 import kr.toxicity.healthbar.api.entity.HealthBarEntity
 import kr.toxicity.healthbar.api.healthbar.HealthBar
+import kr.toxicity.healthbar.api.event.HealthBarCreateEvent
 import kr.toxicity.healthbar.api.healthbar.HealthBarUpdaterGroup
 import kr.toxicity.healthbar.api.player.HealthBarPlayer
 import kr.toxicity.healthbar.api.trigger.HealthBarTrigger
@@ -9,7 +10,9 @@ import kr.toxicity.healthbar.healthbar.HealthBarUpdaterGroupImpl
 import kr.toxicity.healthbar.manager.ConfigManagerImpl
 import kr.toxicity.healthbar.util.PLUGIN
 import kr.toxicity.healthbar.util.asyncTaskTimer
+import kr.toxicity.healthbar.util.call
 import org.bukkit.entity.Player
+import org.bukkit.potion.PotionEffectType
 import java.util.*
 
 class HealthBarPlayerImpl(
@@ -21,12 +24,8 @@ class HealthBarPlayerImpl(
     private val updaterMap = HashMap<UUID, HealthBarUpdaterGroup>()
     private val task = asyncTaskTimer(1, 1) {
         synchronized(updaterMap) {
-            val iterator = updaterMap.values.iterator()
-            synchronized(iterator) {
-                while (iterator.hasNext()) {
-                    val next = iterator.next()
-                    if (!next.update()) iterator.remove()
-                }
+            updaterMap.values.removeIf {
+                !it.update()
             }
         }
     }
@@ -42,28 +41,42 @@ class HealthBarPlayerImpl(
 
     override fun clear() {
         synchronized(updaterMap) {
-            val iterator = updaterMap.values.iterator()
-            synchronized(iterator) {
-                while (iterator.hasNext()) {
-                    iterator.next().remove()
-                }
+            updaterMap.values.removeIf {
+                it.remove()
+                true
             }
-            updaterMap.clear()
         }
     }
 
-    override fun updaterMap(): MutableMap<UUID, HealthBarUpdaterGroup> = updaterMap
+    override fun updaterMap(): MutableMap<UUID, HealthBarUpdaterGroup> = synchronized(updaterMap) {
+        updaterMap
+    }
 
     override fun showHealthBar(healthBar: HealthBar, trigger: HealthBarTrigger, entity: HealthBarEntity) {
         if (ConfigManagerImpl.blacklistEntityType().contains(entity.entity().type)) return
-        if (ConfigManagerImpl.disableToInvulnerableMob() && entity.entity().isInvulnerable) return
         entity.mob()?.let {
             if (it.configuration().blacklist()) return
         }
+        val data = HealthBarCreateEvent(
+            healthBar,
+            trigger,
+            this,
+            entity
+        ).addPredicate {
+            when {
+                ConfigManagerImpl.disableToInvulnerableMob() && entity.entity().isInvulnerable -> false
+                ConfigManagerImpl.disableToInvisibleMob() && (entity.entity().isInvisible || entity.entity().hasPotionEffect(PotionEffectType.INVISIBILITY)) -> false
+                !ConfigManagerImpl.showMeHealthBar() && player.uniqueId == entity.entity().uniqueId -> false
+                else -> true
+            }
+        }.addPredicate {
+            healthBar.condition().apply(it)
+        }
+        if (!data.check() || !data.call()) return
         synchronized(updaterMap) {
             updaterMap.computeIfAbsent(entity.entity().uniqueId) {
                 HealthBarUpdaterGroupImpl(this, entity)
-            }.addHealthBar(healthBar, trigger)
+            }.addHealthBar(data)
         }
     }
 

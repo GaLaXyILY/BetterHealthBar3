@@ -5,6 +5,7 @@ import com.google.gson.JsonObject
 import kr.toxicity.healthbar.api.layout.ImageLayout
 import kr.toxicity.healthbar.api.layout.LayoutGroup
 import kr.toxicity.healthbar.api.layout.TextLayout
+import kr.toxicity.healthbar.manager.EncodeManager
 import kr.toxicity.healthbar.pack.PackResource
 import kr.toxicity.healthbar.util.*
 import net.kyori.adventure.key.Key
@@ -18,7 +19,8 @@ class LayoutGroupImpl(
 
     var index = ADVENTURE_START_INT
 
-    private val imageKey = Key.key(NAMESPACE, "$name/images")
+    private val encodedName = encodeKey(EncodeManager.EncodeNamespace.FONT, "$name/images")
+    private val imageKey = createAdventureKey(encodedName)
     private val group = section.getString("group")
 
     private var i = 0
@@ -52,7 +54,7 @@ class LayoutGroupImpl(
         images.forEach {
             it.build(resource, count, json)
         }
-        resource.font.add("$name/images.json") {
+        resource.font.add("$encodedName.json") {
             JsonObject().apply {
                 add("providers", json)
             }.save()

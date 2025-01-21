@@ -11,7 +11,7 @@ import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.regex.Pattern
 
-object ImageManagerImpl: ImageManager, BetterHealthBerManager {
+object ImageManagerImpl : ImageManager, BetterHealthBerManager {
 
     private val imageMap = ConcurrentHashMap<String, HealthBarImageImpl>()
     private val framePattern = Pattern.compile("(?<name>(([a-zA-Z]|_|[0-9])+)):(?<frame>([0-9]+))")
@@ -23,7 +23,7 @@ object ImageManagerImpl: ImageManager, BetterHealthBerManager {
     override fun reload(resource: PackResource) {
         imageMap.clear()
         val images = resource.dataFolder.subFolder("assets")
-        resource.dataFolder.subFolder("images").forEachAllYamlAsync { file, s, section ->
+        resource.dataFolder.subFolder("images").forEachAllYaml { file, s, section ->
             runWithHandleException("Unable to load this image: $s in ${file.path}") {
                 val typeValue = section.getString("type").ifNull("Unable to find 'type' configuration.")
                 val image = when (val type = ImageType.valueOf(typeValue.uppercase())) {

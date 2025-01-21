@@ -4,12 +4,13 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import kr.toxicity.healthbar.api.component.PixelComponent
 import kr.toxicity.healthbar.api.component.WidthComponent
-import kr.toxicity.healthbar.api.healthbar.HealthBarData
+import kr.toxicity.healthbar.api.event.HealthBarCreateEvent
 import kr.toxicity.healthbar.api.image.HealthBarImage
 import kr.toxicity.healthbar.api.layout.ImageLayout
 import kr.toxicity.healthbar.api.listener.HealthBarListener
 import kr.toxicity.healthbar.api.renderer.ImageRenderer
 import kr.toxicity.healthbar.data.BitmapData
+import kr.toxicity.healthbar.manager.EncodeManager
 import kr.toxicity.healthbar.manager.ImageManagerImpl
 import kr.toxicity.healthbar.manager.ListenerManagerImpl
 import kr.toxicity.healthbar.pack.PackResource
@@ -41,16 +42,16 @@ class ImageLayoutImpl(
         val componentMap = HashMap<BitmapData, WidthComponent>()
         image.images().forEach {
             val list = ArrayList<PixelComponent>()
-            val dir = "${parent.name}/image/${layer()}/${it.name}"
+            val dir = "${parent.name}/image/${layer()}/${it.name}".encodeFile(EncodeManager.EncodeNamespace.TEXTURES)
             resource.textures.add(dir) {
                 it.image.image.withOpacity(layer()).toByteArray()
             }
             val newHeight = (it.image.image.height.toDouble() * scale()).roundToInt()
             val div = newHeight.toDouble() / it.image.image.height.toDouble()
-            for (i in (0..<count)) {
-                val y = (y() + groupY() * i)
+            for (i in 0..<count) {
+                val y = y() + groupY() * i
                 list.add(componentMap.computeIfAbsent(BitmapData(dir, y, newHeight)) { _ ->
-                    val component = (parent.index++).parseChar()
+                    val component = parent.index++.parseChar()
                     jsonArray.add(JsonObject().apply {
                         addProperty("type", "bitmap")
                         addProperty("file", "$NAMESPACE:$dir")
@@ -71,12 +72,12 @@ class ImageLayoutImpl(
         }
     }
 
-    override fun createImageRenderer(pair: HealthBarData): ImageRenderer {
+    override fun createImageRenderer(pair: HealthBarCreateEvent): ImageRenderer {
         return Renderer(pair)
     }
 
     private inner class Renderer(
-        private val pair: HealthBarData
+        private val pair: HealthBarCreateEvent
     ): ImageRenderer {
         private var next = 0
         private var d = 0
@@ -100,7 +101,7 @@ class ImageLayoutImpl(
             val list = if (listen >= 0) {
                 components[(listen * components.lastIndex).roundToInt().coerceAtMost(components.lastIndex)]
             } else {
-                components[(next++) % components.size]
+                components[next++ % components.size]
             }
             return list[count.coerceAtMost(list.lastIndex)]
         }
